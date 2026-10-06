@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# local agent-memory databases
+*.db
+*.db-wal
+*.db-shm
+*.agentmem.db
+
+# local Command Code project state
+.commandcode/

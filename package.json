@@ -1,0 +1,67 @@
+{
+  "name": "agent-memory",
+  "version": "0.1.0",
+  "description": "Local-first, portable agent memory: episodic events, typed memories, a persistent self-model, hybrid retrieval, and budgeted context compilation over a single SQLite file.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-memory": "./dist/cli/index.js",
+    "agent-memory-mcp": "./dist/mcp/server.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands.d.ts",
+      "import": "./dist/commands.js",
+      "default": "./dist/commands.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md"
+  ],
+  "keywords": [
+    "agent",
+    "memory",
+    "sqlite",
+    "llm",
+    "retrieval",
+    "context",
+    "self-model",
+    "fts5"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx",
+    "cli": "tsx src/cli/index.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "example": "tsx examples/basic.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "better-sqlite3": "^11.8.1",
+    "ulid": "^2.3.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
