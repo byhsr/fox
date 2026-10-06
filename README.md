@@ -11,6 +11,30 @@ It is a TypeScript package for **Node.js 22+** and **Bun**, with a
 framework-independent, promise-based mutation API. It does not run a web server
 and does not talk to the network.
 
+## Philosophy
+
+Most work in agentic memory is about *the user's* context: remembering what
+someone said, preferred, or did, so the assistant can serve them better. `fox`
+points the same machinery at a different subject — the agent itself.
+
+Here, memory is what gives an agent a **self**. The self-model holds its
+identity, values, goals, and current focus. Typed memories hold what it knows
+(`semantic`), how it does things (`procedural`), the rules it operates under
+(`policy`), its leanings (`preference`), and what it concluded (`reflection`).
+Events are its experience: what actually happened, in order. Together they are
+not a transcript of the conversation — they are a sense of self and a repertoire
+of things the agent can do and how it does them.
+
+None of it is static. Every interaction, and every user, leaves a trace, and the
+agent is meant to change because of it. Set a self-model key and it upserts as
+the agent's understanding of itself shifts. Reflect over recurring episodes and
+last week's failures become this week's procedures. Memory compounds with use.
+
+The goal is not a bigger context window. It is a small, durable sense of self
+and capability that survives sessions, stays lean in the prompt, and can be
+recalled on demand — so the agent carries *who it is and what it can do*, not
+everything it has ever seen.
+
 ## Why this design
 
 The hard problem is fast iteration on memory semantics, retrieval quality,
