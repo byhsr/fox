@@ -127,6 +127,54 @@ Queries default to `scopeMode: "inherit"`, which means they see their own scope
 **plus** `global` (shared rules and facts). Use `scopeMode: "exact"` to match only
 the given scope. You may also pass a raw string key (`"project:agent-memory"`).
 
+### Namespaces
+
+A namespace is a named scope — typically a project — whose memory is tracked
+together. Register one to give it a name and description, then list or show it to
+see everything tracked there.
+
+```ts
+memory.createNamespace({
+  scope: Scope.project("checkout"),
+  name: "Checkout Service",
+  description: "Payment flow",
+});
+
+await memory.addMemory({
+  agentId: "forge",
+  scope: Scope.project("checkout"),
+  kind: MemoryKind.Policy,
+  title: "Validate card tokens",
+  content: "Never charge without validating the card token first.",
+});
+memory.setSelfModel({ agentId: "forge", scope: Scope.project("checkout"), key: "identity", value: "Checkout agent." });
+
+memory.listNamespaces();                                        // namespaces with counts + last activity
+memory.namespaceDetail({ scope: Scope.project("checkout") });   // everything tracked there
+```
+
+To avoid repeating the agent and scope, bind a handle:
+
+```ts
+const project = memory.namespace({ agentId: "forge", scope: Scope.project("checkout") });
+
+await project.addMemory({ kind: MemoryKind.Policy, title: "…", content: "…" });
+project.setSelfModel({ key: "identity", value: "Checkout agent." });
+project.stats();                    // counts for this namespace
+project.detail();                   // self-model, memories, and recent events
+project.compileContext({ task: "deploy" });
+```
+
+Counts and last-activity are derived live from the scoped events, memories, and
+self-model entries. The same operations are available from the CLI (and a
+portable binary):
+
+```bash
+agent-memory create_namespace --json '{"scope":"project:checkout","name":"Checkout Service"}'
+agent-memory list_namespaces --pretty
+agent-memory get_namespace --json '{"scope":"project:checkout"}' --pretty
+```
+
 ### Events
 
 Events are raw, mostly-immutable things that happened. They feed reflection and
@@ -166,13 +214,18 @@ Only `active` memories are retrieved and compiled by default. Use
 
 ### Self-model
 
-The self-model is a small, canonical set of keyed entries per agent. Setting a
-key upserts it.
+The self-model is a small, canonical set of keyed entries, scoped like everything
+else. Setting a key upserts it. Entries default to `global`; set a scope to give a
+namespace its own identity/values/focus, and reads inherit `global` unless you ask
+for `exact`.
 
 ```ts
 memory.setSelfModel({ agentId: "forge", key: "identity", value: "A careful coding agent." });
-memory.setSelfModel({ agentId: "forge", key: "current_focus", value: "Ship a reliable deploy path." });
-memory.selfModelEntries("forge");
+memory.setSelfModel({ agentId: "forge", scope: Scope.project("checkout"), key: "current_focus", value: "Ship a reliable checkout." });
+
+memory.selfModelEntries("forge");                                      // every scope
+memory.selfModelEntries("forge", Scope.project("checkout"));           // checkout + global
+memory.selfModelEntries("forge", Scope.project("checkout"), "exact");  // checkout only
 ```
 
 ### Retrieval
@@ -311,17 +364,20 @@ embedding-enhanced path. `compileContext` (sync) stays lexical + heuristic.
 | `updateMemory(id, patch)` | `Promise<Memory>` | Re-embeds when text changes. |
 | `archiveMemory(id)` / `forgetMemory(id)` | `Promise<Memory>` / `Promise<void>` | Soft / hard delete. |
 | `getMemory(id)` / `listMemories(input)` | `Memory` / `Memory[]` | Reads. |
-| `setSelfModel(input)` / `getSelfModel(...)` / `selfModelEntries(...)` / `removeSelfModel(...)` | | Self-model. |
+| `setSelfModel(input)` / `getSelfModel(...)` / `selfModelEntries(...)` / `removeSelfModel(...)` | | Scoped self-model (defaults to `global`). |
 | `retrieve(input)` | `Promise<RetrievalHit[]>` | Embedding-aware. |
 | `search(input)` | `RetrievalHit[]` | Synchronous lexical + heuristic. |
 | `compileContext(input)` | `CompiledContext` | Synchronous. |
 | `compileContextAsync(input)` | `Promise<CompiledContext>` | Embedding-aware. |
 | `reflect(input)` | `Promise<ReflectionDraft[]>` | Optionally persists. |
 | `saveReflection(input)` | `Promise<Memory>` | Persist a reflection. |
+| `createNamespace(input)` / `getNamespace(scope)` / `listNamespaces(input)` | | Namespace registry. |
+| `namespaceSummary(scope)` / `namespaceDetail(input)` / `removeNamespace(scope)` | | Counts and everything tracked in a namespace. |
+| `namespace(options)` | `NamespaceHandle` | Bound, pre-scoped namespace operations. |
 | `stats()` / `close()` | | Lifecycle. |
 
 The lower-level stores (`memory.events`, `memory.memories`, `memory.selfModel`,
-`memory.retriever`) are also exported and usable directly.
+`memory.namespaces`, `memory.retriever`) are also exported and usable directly.
 
 ### Errors
 
@@ -345,7 +401,10 @@ PRAGMA synchronous = NORMAL;
 Schema migrations live in `migrations/` and are applied inside a transaction,
 tracked in `schema_migrations`. Two FTS5 tables (`memories_fts`, `events_fts`)
 are kept in sync by triggers. Embeddings are stored as compact `BLOB`s
-(`Float32Array`), tagged with their model id and dimension.
+(`Float32Array`), tagged with their model id and dimension. Namespaces are
+recorded in a `namespaces` registry, and `self_model` rows are scoped
+(`unique(agent_id, scope, key)`; rows from older databases are migrated as
+`global`).
 
 ## Design notes
 
@@ -356,6 +415,48 @@ are kept in sync by triggers. Embeddings are stored as compact `BLOB`s
   followed by `context.toMarkdown()` — working as-is.
 - **Embeddings are additive.** Retrieval and compilation never depend on them.
 - **No hidden I/O.** The core package performs no network calls and needs no keys.
+
+## Portable binary
+
+You can bake the current memory into a single self-contained executable and move
+it anywhere — the accumulated memory comes with it, with no Node install, no
+`node_modules`, and no native addon to build.
+
+```bash
+# Build from the default database ($AGENT_MEMORY_DB or ./agent-memory.db)
+npm run binary
+
+# Or choose the source database and output
+bun run scripts/build-binary.ts --db ./forge.agentmem.db --out ./forge-memory
+
+# Cross-compile (Bun downloads the target runtime on first use)
+bun run scripts/build-binary.ts --target bun-linux-x64 --out ./forge-memory-linux
+
+# Build an MCP server binary instead of the CLI
+npm run binary:mcp
+```
+
+The build checkpoints the source database (folding any WAL into a single file),
+bakes it plus the migration SQL into the executable, and compiles with
+`bun build --compile`. At runtime the binary uses Bun's built-in SQLite rather
+than `better-sqlite3`, which cannot load under Bun (oven-sh/bun#4290).
+
+On first launch the binary seeds a working database from the embedded copy:
+
+- If the target database (from `--db`, `$AGENT_MEMORY_DB`, or `./agent-memory.db`)
+  does not exist, it is created from the baked-in memory.
+- If it already exists, it is left untouched, so memory accumulates across runs.
+
+To pull memory back out of a binary — to inspect it, move it on, or re-bake it
+into a new binary — use `extract`:
+
+```bash
+./agent-memory extract --out memory.db        # current (working) memory
+./agent-memory extract --embedded --out baked.db  # the memory baked at build time
+```
+
+Both produce an ordinary SQLite file, readable by this package, the CLI, or any
+SQLite tool.
 
 ## Development
 

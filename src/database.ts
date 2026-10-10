@@ -1,8 +1,9 @@
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { DatabaseError, MigrationError } from "./errors.js";
 import { runMigrations } from "./schema.js";
+import { openRawDatabase } from "./sqlite.js";
 
 export type SqliteDatabase = Database.Database;
 export type SqliteStatement<Row = unknown, Params extends unknown[] = unknown[]> = Database.Statement<Params, Row>;
@@ -40,7 +41,7 @@ export class Db {
     }
 
     try {
-      this.raw = this.readOnly ? new Database(this.path, { readonly: true }) : new Database(this.path);
+      this.raw = openRawDatabase(this.path, { readOnly: this.readOnly });
     } catch (cause) {
       throw new DatabaseError(`Failed to open SQLite database at "${options.path}"`, { cause });
     }

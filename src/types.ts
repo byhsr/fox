@@ -193,6 +193,8 @@ export interface Memory {
 export interface SelfModelEntry {
   id: string;
   agentId: string;
+  scope: string;
+  scopeType: ScopeType;
   key: string;
   value: string;
   confidence: number;
@@ -200,6 +202,39 @@ export interface SelfModelEntry {
   source: string | null;
   createdAt: EpochMs;
   updatedAt: EpochMs;
+}
+
+/** A named scope (typically a project) whose memory is tracked together. */
+export interface Namespace {
+  /** Canonical scope key, e.g. `project:checkout-service`. */
+  key: string;
+  type: ScopeType;
+  id: string | null;
+  name: string;
+  description: string | null;
+  metadata: JsonObject;
+  createdAt: EpochMs;
+  updatedAt: EpochMs;
+}
+
+export interface NamespaceCounts {
+  events: number;
+  memories: number;
+  selfModelEntries: number;
+}
+
+/** A namespace plus a summary of what is tracked in it. */
+export interface NamespaceSummary {
+  namespace: Namespace;
+  counts: NamespaceCounts;
+  lastActivityAt: EpochMs | null;
+}
+
+/** Everything tracked in a namespace: summary plus the actual entries. */
+export interface NamespaceDetail extends NamespaceSummary {
+  selfModel: SelfModelEntry[];
+  memories: Memory[];
+  events: Event[];
 }
 
 export interface ContextItem {
@@ -251,7 +286,7 @@ const zTime = z.union([
   z.string().refine((value) => !Number.isNaN(Date.parse(value)), { message: "invalid date string" }),
 ]);
 const zJsonObject = z.record(z.unknown());
-const zScopeInput = z.union([
+export const zScopeInput = z.union([
   z
     .object({
       type: z.enum(SCOPE_TYPES),
@@ -261,7 +296,7 @@ const zScopeInput = z.union([
     .strict(),
   z.string().min(1),
 ]);
-const zScopeMode = z.enum(["exact", "inherit"]);
+export const zScopeMode = z.enum(["exact", "inherit"]);
 const zFn = <T extends (...args: never[]) => unknown>(label: string) =>
   z.custom<T>((value) => typeof value === "function", { message: `${label} must be a function` });
 
@@ -380,6 +415,7 @@ export type ListMemoriesInput = z.input<typeof listMemoriesSchema>;
 export const setSelfModelSchema = z
   .object({
     agentId: z.string().min(1),
+    scope: zScopeInput.optional(),
     key: z.string().min(1),
     value: z.string().min(1),
     confidence: zUnit.optional(),
@@ -389,6 +425,42 @@ export const setSelfModelSchema = z
   .strict();
 
 export type SetSelfModelInput = z.input<typeof setSelfModelSchema>;
+
+// --- namespaces -------------------------------------------------------------
+
+export const createNamespaceSchema = z
+  .object({
+    scope: zScopeInput,
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    metadata: zJsonObject.optional(),
+  })
+  .strict();
+
+export const namespaceRefSchema = z.object({ scope: zScopeInput }).strict();
+
+export const listNamespacesSchema = z
+  .object({
+    type: z.enum(SCOPE_TYPES).optional(),
+    query: z.string().min(1).optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  })
+  .strict();
+
+export const getNamespaceSchema = z
+  .object({
+    scope: zScopeInput,
+    memoryLimit: z.number().int().min(1).max(200).optional(),
+    eventLimit: z.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
+export type CreateNamespaceInput = z.input<typeof createNamespaceSchema>;
+export type ListNamespacesInput = z.input<typeof listNamespacesSchema>;
+export type GetNamespaceInput = z.input<typeof getNamespaceSchema>;
+export type CreateNamespaceParams = z.output<typeof createNamespaceSchema>;
+export type ListNamespacesParams = z.output<typeof listNamespacesSchema>;
+export type GetNamespaceParams = z.output<typeof getNamespaceSchema>;
 
 // --- retrieval --------------------------------------------------------------
 

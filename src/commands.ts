@@ -4,7 +4,11 @@ import { ValidationError } from "./errors.js";
 import {
   addMemorySchema,
   compileContextSchema,
+  createNamespaceSchema,
+  getNamespaceSchema,
   listMemoriesSchema,
+  listNamespacesSchema,
+  namespaceRefSchema,
   parseInput,
   recordEventSchema,
   reflectSchema,
@@ -12,6 +16,8 @@ import {
   saveReflectionSchema,
   setSelfModelSchema,
   updateMemorySchema,
+  zScopeInput,
+  zScopeMode,
 } from "./types.js";
 
 /**
@@ -119,16 +125,25 @@ export const commands: CommandDefinition[] = [
   }),
   defineCommand({
     name: "get_self_model",
-    description: "Get all self-model entries for an agent, or a single entry when key is provided.",
-    schema: z.object({ agentId: z.string().min(1), key: z.string().min(1).optional() }).strict(),
+    description: "Get self-model entries for an agent in a scope, or a single entry when key is provided.",
+    schema: z
+      .object({
+        agentId: z.string().min(1),
+        key: z.string().min(1).optional(),
+        scope: zScopeInput.optional(),
+        scopeMode: zScopeMode.optional(),
+      })
+      .strict(),
     run: (memory, input) =>
-      input.key !== undefined ? (memory.getSelfModel(input.agentId, input.key) ?? null) : memory.selfModelEntries(input.agentId),
+      input.key !== undefined
+        ? (memory.getSelfModel(input.agentId, input.key, input.scope) ?? null)
+        : memory.selfModelEntries(input.agentId, input.scope, input.scopeMode ?? "inherit"),
   }),
   defineCommand({
     name: "remove_self_model",
-    description: "Remove a self-model entry by key.",
-    schema: z.object({ agentId: z.string().min(1), key: z.string().min(1) }).strict(),
-    run: (memory, input) => ({ removed: memory.removeSelfModel(input.agentId, input.key) }),
+    description: "Remove a self-model entry by key (in a scope; defaults to global).",
+    schema: z.object({ agentId: z.string().min(1), key: z.string().min(1), scope: zScopeInput.optional() }).strict(),
+    run: (memory, input) => ({ removed: memory.removeSelfModel(input.agentId, input.key, input.scope) }),
   }),
   defineCommand({
     name: "reflect",
@@ -142,6 +157,32 @@ export const commands: CommandDefinition[] = [
     description: "Persist a reflection as a memory.",
     schema: saveReflectionSchema,
     run: (memory, input) => memory.saveReflection(input),
+  }),
+  defineCommand({
+    name: "create_namespace",
+    description:
+      "Register (or update) a namespace: a named scope (e.g. a project) whose memory is tracked together. Use the scope to record memory under it.",
+    schema: createNamespaceSchema,
+    run: (memory, input) => memory.createNamespace(input),
+  }),
+  defineCommand({
+    name: "list_namespaces",
+    description: "List registered namespaces with their counts of events, memories, self-model entries, and last activity.",
+    schema: listNamespacesSchema,
+    run: (memory, input) => memory.listNamespaces(input),
+  }),
+  defineCommand({
+    name: "get_namespace",
+    description:
+      "Show everything tracked in a namespace: registration, counts, self-model entries, memories, and recent events.",
+    schema: getNamespaceSchema,
+    run: (memory, input) => memory.namespaceDetail(input) ?? null,
+  }),
+  defineCommand({
+    name: "remove_namespace",
+    description: "Unregister a namespace. Tracked memory is left in place.",
+    schema: namespaceRefSchema,
+    run: (memory, input) => ({ removed: memory.removeNamespace(input.scope) }),
   }),
   defineCommand({
     name: "stats",

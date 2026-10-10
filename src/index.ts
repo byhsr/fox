@@ -4,6 +4,8 @@ import { AgentMemoryError, EmbeddingError } from "./errors.js";
 import type { Embedder } from "./embedder.js";
 import { EventStore } from "./events.js";
 import { MemoryStore } from "./memories.js";
+import { NamespaceHandle, type NamespaceOptions } from "./namespace.js";
+import { NamespaceStore } from "./namespaces.js";
 import { HeuristicReflector, type ReflectionContext, type ReflectionDraft, type Reflector } from "./reflection.js";
 import { Retriever } from "./retrieval.js";
 import type { CountRow } from "./schema.js";
@@ -25,15 +27,22 @@ import type {
   AddMemoryParams,
   AgentMemoryOptions,
   CompileContextInput,
+  CreateNamespaceInput,
   Event,
+  GetNamespaceInput,
   ListEventsInput,
   ListMemoriesInput,
+  ListNamespacesInput,
   Memory,
+  Namespace,
+  NamespaceDetail,
+  NamespaceSummary,
   RecordEventInput,
   ReflectInput,
   RetrieveInput,
   RetrievalHit,
   SaveReflectionInput,
+  ScopeInput,
   SelfModelEntry,
   SetSelfModelInput,
   UpdateMemoryInput,
@@ -58,6 +67,7 @@ export class AgentMemory {
   readonly events: EventStore;
   readonly memories: MemoryStore;
   readonly selfModel: SelfModelStore;
+  readonly namespaces: NamespaceStore;
   readonly retriever: Retriever;
   readonly embedder: Embedder | null;
   readonly reflector: Reflector;
@@ -77,6 +87,7 @@ export class AgentMemory {
     this.events = new EventStore(this.db);
     this.memories = new MemoryStore(this.db);
     this.selfModel = new SelfModelStore(this.db);
+    this.namespaces = new NamespaceStore(this.db);
     this.retriever = new Retriever(this.db, this.memories, this.embedder);
     this.compiler = new ContextCompiler(
       this.db,
@@ -155,24 +166,68 @@ export class AgentMemory {
 
   // --- self model -----------------------------------------------------------
 
+  /** Set (upsert) a keyed self-model entry. Defaults to `global` scope. */
   setSelfModel(input: SetSelfModelInput): SelfModelEntry {
     this.assertOpen();
     return this.selfModel.set(input);
   }
 
-  getSelfModel(agentId: string, key: string): SelfModelEntry | undefined {
+  /** Get a self-model entry. Without a scope, reads the `global` entry. */
+  getSelfModel(agentId: string, key: string, scope?: ScopeInput): SelfModelEntry | undefined {
     this.assertOpen();
-    return this.selfModel.get(agentId, key);
+    return this.selfModel.get(agentId, key, scope);
   }
 
-  selfModelEntries(agentId: string): SelfModelEntry[] {
+  /** List self-model entries. With a scope, includes `global` unless `exact`. */
+  selfModelEntries(agentId: string, scope?: ScopeInput, scopeMode: "exact" | "inherit" = "inherit"): SelfModelEntry[] {
     this.assertOpen();
-    return this.selfModel.all(agentId);
+    return this.selfModel.all(agentId, scope, scopeMode);
   }
 
-  removeSelfModel(agentId: string, key: string): boolean {
+  removeSelfModel(agentId: string, key: string, scope?: ScopeInput): boolean {
     this.assertOpen();
-    return this.selfModel.remove(agentId, key);
+    return this.selfModel.remove(agentId, key, scope);
+  }
+
+  // --- namespaces -----------------------------------------------------------
+
+  /** Register (or update) a namespace: a named scope tracked together. */
+  createNamespace(input: CreateNamespaceInput): Namespace {
+    this.assertOpen();
+    return this.namespaces.create(input);
+  }
+
+  getNamespace(scope: ScopeInput): Namespace | undefined {
+    this.assertOpen();
+    return this.namespaces.get(scope);
+  }
+
+  listNamespaces(input: ListNamespacesInput = {}): NamespaceSummary[] {
+    this.assertOpen();
+    return this.namespaces.list(input);
+  }
+
+  namespaceSummary(scope: ScopeInput): NamespaceSummary | undefined {
+    this.assertOpen();
+    return this.namespaces.summary(scope);
+  }
+
+  /** Everything tracked in a namespace, with optional entry limits. */
+  namespaceDetail(input: GetNamespaceInput): NamespaceDetail | undefined {
+    this.assertOpen();
+    return this.namespaces.detail(input);
+  }
+
+  /** Unregister a namespace. Tracked memory is left in place. */
+  removeNamespace(scope: ScopeInput): boolean {
+    this.assertOpen();
+    return this.namespaces.remove(scope);
+  }
+
+  /** Bind a handle to a namespace so operations are pre-scoped. */
+  namespace(options: NamespaceOptions): NamespaceHandle {
+    this.assertOpen();
+    return new NamespaceHandle(this, options);
   }
 
   // --- retrieval ------------------------------------------------------------
@@ -326,5 +381,7 @@ export * from "./retrieval.js";
 export * from "./events.js";
 export * from "./memories.js";
 export * from "./self-model.js";
+export * from "./namespaces.js";
+export * from "./namespace.js";
 export { Db } from "./database.js";
 export type { SqliteDatabase, SqliteStatement, RunResult } from "./database.js";

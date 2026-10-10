@@ -34,6 +34,8 @@ const require = createRequire(import.meta.url);
 
 /** Read the package version (used for CLI/MCP identity). */
 export function readPackageVersion(): string {
+  const override = process.env["AGENT_MEMORY_VERSION"];
+  if (override !== undefined && override.length > 0) return override;
   try {
     const pkg = require("../../package.json") as { version?: string };
     return pkg.version ?? "0.0.0";

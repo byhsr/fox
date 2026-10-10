@@ -216,7 +216,7 @@ export class ContextCompiler {
     }
 
     if (params.includeSelf !== false) {
-      const items = this.selfModel.all(params.agentId).map<ContextItem>((entry) => {
+      const items = this.selfModel.all(params.agentId, scope.key, scopeMode).map<ContextItem>((entry) => {
         const text = `${entry.key}: ${entry.value}`;
         return {
           id: entry.id,

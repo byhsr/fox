@@ -3,6 +3,10 @@ dist/
 coverage/
 *.log
 
+# standalone binary build output
+dist-binary/
+.binary-build/
+
 # local agent-memory databases
 *.db
 *.db-wal

@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AgentMemory,
   AgentMemoryError,
+  Db,
   HashEmbedder,
   MemoryKind,
   MemoryStatus,
@@ -434,5 +435,115 @@ describe("lifecycle", () => {
     memory.close();
     memory.close();
     expect(() => memory.listMemories({ agentId: "forge" })).toThrow(AgentMemoryError);
+  });
+});
+
+describe("scoped self model", () => {
+  it("scopes entries per namespace and inherits global", () => {
+    const memory = make();
+    memory.setSelfModel({ agentId: "forge", key: "identity", value: "global" });
+    memory.setSelfModel({ agentId: "forge", scope: Scope.project("a"), key: "identity", value: "A" });
+    memory.setSelfModel({ agentId: "forge", scope: Scope.project("b"), key: "focus", value: "B" });
+
+    expect(memory.getSelfModel("forge", "identity")?.value).toBe("global");
+    expect(memory.getSelfModel("forge", "identity", Scope.project("a"))?.value).toBe("A");
+    expect(memory.getSelfModel("forge", "identity", Scope.project("b"))).toBeUndefined();
+
+    const inA = memory.selfModelEntries("forge", Scope.project("a"));
+    expect(inA.map((entry) => `${entry.key}=${entry.value}`).sort()).toEqual(["identity=A", "identity=global"]);
+    expect(memory.selfModelEntries("forge", Scope.project("a"), "exact")).toHaveLength(1);
+    expect(memory.selfModelEntries("forge")).toHaveLength(3);
+
+    expect(memory.removeSelfModel("forge", "focus", Scope.project("b"))).toBe(true);
+    expect(memory.selfModelEntries("forge")).toHaveLength(2);
+  });
+
+  it("migrates a legacy (unscoped) database, preserving entries as global", () => {
+    const path = dbPath();
+    const legacy = new Db({ path, autoMigrate: false });
+    legacy.exec(readFileSync(new URL("../migrations/001_init.sql", import.meta.url), "utf8"));
+    legacy.exec("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)");
+    const now = Date.now();
+    legacy.run("INSERT INTO schema_migrations(version, applied_at) VALUES ('001_init.sql', ?)", now);
+    legacy.run("INSERT INTO agents(id, created_at, updated_at) VALUES ('forge', ?, ?)", now, now);
+    legacy.run(
+      "INSERT INTO self_model(id, agent_id, key, value, confidence, importance, source, created_at, updated_at) VALUES ('slf_legacy', 'forge', 'identity', 'legacy value', 0.8, 0.7, NULL, ?, ?)",
+      now,
+      now,
+    );
+    legacy.close();
+
+    const memory = new AgentMemory({ path });
+    open.push(memory);
+    const entries = memory.selfModelEntries("forge");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.scope).toBe("global");
+    expect(entries[0]?.value).toBe("legacy value");
+
+    memory.setSelfModel({ agentId: "forge", scope: Scope.project("p"), key: "identity", value: "project value" });
+    expect(memory.getSelfModel("forge", "identity")?.value).toBe("legacy value");
+    expect(memory.getSelfModel("forge", "identity", Scope.project("p"))?.value).toBe("project value");
+  });
+});
+
+describe("namespaces", () => {
+  it("registers a namespace and tracks everything in it", async () => {
+    const memory = make();
+    const scope = Scope.project("checkout");
+    const created = memory.createNamespace({ scope, name: "Checkout Service", description: "payments" });
+    expect(created.key).toBe("project:checkout");
+    expect(created.name).toBe("Checkout Service");
+
+    await memory.addMemory({ agentId: "forge", scope, kind: MemoryKind.Policy, title: "Rule", content: "guardrail" });
+    await memory.recordEvent({ agentId: "forge", scope, type: "note", content: "hello" });
+    memory.setSelfModel({ agentId: "forge", scope, key: "identity", value: "checkout bot" });
+    memory.setSelfModel({ agentId: "forge", key: "identity", value: "global bot" });
+
+    const summary = memory.namespaceSummary(scope);
+    expect(summary?.counts).toEqual({ events: 1, memories: 1, selfModelEntries: 1 });
+    expect(summary?.lastActivityAt).not.toBeNull();
+
+    const list = memory.listNamespaces();
+    expect(list.map((item) => item.namespace.key)).toEqual(["project:checkout"]);
+
+    const detail = memory.namespaceDetail({ scope });
+    expect(detail?.memories).toHaveLength(1);
+    expect(detail?.events).toHaveLength(1);
+    expect(detail?.selfModel).toHaveLength(1);
+    expect(detail?.selfModel[0]?.value).toBe("checkout bot");
+
+    expect(memory.removeNamespace(scope)).toBe(true);
+    expect(memory.getNamespace(scope)).toBeUndefined();
+  });
+
+  it("reports last activity even when some categories are empty", async () => {
+    const memory = make();
+    const scope = Scope.project("mem-only");
+    memory.createNamespace({ scope });
+    await memory.addMemory({ agentId: "forge", scope, kind: MemoryKind.Semantic, title: "Only a memory", content: "no events" });
+    const summary = memory.namespaceSummary(scope);
+    expect(summary?.counts).toEqual({ events: 0, memories: 1, selfModelEntries: 0 });
+    expect(summary?.lastActivityAt).not.toBeNull();
+
+    memory.createNamespace({ scope: Scope.project("empty") });
+    expect(memory.namespaceSummary(Scope.project("empty"))?.lastActivityAt).toBeNull();
+  });
+
+  it("bounds operations to a namespace via a handle", async () => {
+    const memory = make();
+    const project = memory.namespace({ agentId: "forge", scope: Scope.project("checkout") });
+    memory.createNamespace({ scope: "project:checkout" });
+
+    await project.addMemory({ kind: MemoryKind.Semantic, title: "Fact", content: "The sky is blue." });
+    await project.recordEvent({ type: "note", content: "observed" });
+    project.setSelfModel({ key: "identity", value: "checkout" });
+
+    expect(project.stats()).toEqual({ events: 1, memories: 1, selfModelEntries: 1 });
+    expect(project.listMemories().map((item) => item.title)).toEqual(["Fact"]);
+    expect(project.getSelfModel("identity")?.value).toBe("checkout");
+
+    const context = project.compileContext({ task: "deploy", tokenBudget: 600 });
+    expect(context.sections.some((section) => section.id === "self")).toBe(true);
+    expect(context.sections.some((section) => section.id === "episodes")).toBe(true);
   });
 });

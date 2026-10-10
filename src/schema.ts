@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { ulid } from "ulid";
 import type { Db } from "./database.js";
 import { MigrationError } from "./errors.js";
-import type { Event, Memory, MemoryKind, MemoryStatus, ScopeType, SelfModelEntry } from "./types.js";
+import type { Event, Memory, MemoryKind, MemoryStatus, Namespace, ScopeType, SelfModelEntry } from "./types.js";
 
 /** Ordered list of migration files under `migrations/`. */
-export const MIGRATIONS: readonly string[] = ["001_init.sql"];
+export const MIGRATIONS: readonly string[] = ["001_init.sql", "002_namespaces.sql"];
 
 export const MEMORY_COLUMNS = [
   "id",
@@ -51,11 +51,24 @@ export const EVENT_COLUMNS = [
 export const SELF_MODEL_COLUMNS = [
   "id",
   "agent_id",
+  "scope",
+  "scope_type",
   "key",
   "value",
   "confidence",
   "importance",
   "source",
+  "created_at",
+  "updated_at",
+].join(", ");
+
+export const NAMESPACE_COLUMNS = [
+  "key",
+  "type",
+  "id",
+  "name",
+  "description",
+  "metadata",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -104,11 +117,24 @@ export interface MemoryRow {
 export interface SelfModelRow {
   id: string;
   agent_id: string;
+  scope: string;
+  scope_type: string;
   key: string;
   value: string;
   confidence: number;
   importance: number;
   source: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface NamespaceRow {
+  key: string;
+  type: string;
+  id: string | null;
+  name: string;
+  description: string | null;
+  metadata: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -170,11 +196,26 @@ export function rowToSelfModel(row: SelfModelRow): SelfModelEntry {
   return {
     id: row.id,
     agentId: row.agent_id,
+    scope: row.scope,
+    scopeType: row.scope_type as ScopeType,
     key: row.key,
     value: row.value,
     confidence: row.confidence,
     importance: row.importance,
     source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function rowToNamespace(row: NamespaceRow): Namespace {
+  return {
+    key: row.key,
+    type: row.type as ScopeType,
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    metadata: parseJson<Record<string, unknown>>(row.metadata, {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -220,7 +261,19 @@ export function migrationsDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 }
 
+let embeddedMigrations: Readonly<Record<string, string>> | undefined;
+
+/**
+ * Supply migration SQL directly, for environments without a `migrations/`
+ * directory on disk (e.g. a compiled binary with the SQL baked in).
+ */
+export function setEmbeddedMigrations(migrations: Readonly<Record<string, string>>): void {
+  embeddedMigrations = migrations;
+}
+
 export function loadMigrationSql(version: string): string {
+  const embedded = embeddedMigrations?.[version];
+  if (embedded !== undefined) return embedded;
   const file = join(migrationsDir(), version);
   if (!existsSync(file)) {
     throw new MigrationError(`Migration file not found: ${file}`);

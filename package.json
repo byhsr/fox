@@ -47,6 +47,8 @@
     "cli": "tsx src/cli/index.ts",
     "mcp": "tsx src/mcp/server.ts",
     "example": "tsx examples/basic.ts",
+    "binary": "bun run scripts/build-binary.ts",
+    "binary:mcp": "bun run scripts/build-binary.ts --mode mcp",
     "test": "vitest run",
     "test:watch": "vitest"
   },
